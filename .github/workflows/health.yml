@@ -1,0 +1,33 @@
+name: Hourly release health
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: web-lab-health
+  cancel-in-progress: false
+jobs:
+  check:
+    if: ${{ !github.event.repository.private && vars.LIVE_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: screenshot-cleaner
+            route: ''
+          - app: signal-garden
+            route: /signal-garden
+    env:
+      APP: ${{ matrix.app }}
+      APP_ROUTE: ${{ matrix.route }}
+      LIVE_URL: ${{ vars.LIVE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: |
+          LIVE_URL="${LIVE_URL%/}${APP_ROUTE}" python3 scripts/check-live.py "$APP"
