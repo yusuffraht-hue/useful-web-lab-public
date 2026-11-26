@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:">
+<title>Screenshot Cleaner</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#222632;background:#f5f4ee;color-scheme:light}*{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:auto;padding:clamp(20px,5vw,64px)}header{padding-bottom:28px}h1{font-size:clamp(36px,6vw,68px);letter-spacing:-.07em;line-height:1;margin:12px 0}h2{font-size:1rem;margin:0 0 12px}p{line-height:1.5;margin:0 0 12px;color:#535968}.privacy{color:#31553d;font-size:.88rem}.layout{display:grid;grid-template-columns: minmax(0,1fr) 250px;gap:16px}.panel{background:#fff;border:1px solid #deded5;border-radius:18px;padding:16px;min-width:0}.tools,.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}button,select{background:#f4f4ef;border:1px solid #d9dcd2;border-radius:9px;padding:9px 12px;color:inherit;font:inherit;cursor:pointer;min-height:42px}button:disabled,select:disabled{opacity:.48;cursor:default}button.primary,[aria-pressed=true]{background:#253f30;color:white;border-color:#253f30}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #657f6a;outline-offset:3px}.stage{min-height:280px;display:grid;place-items:center;padding:12px;background:#eaece5;border-radius:12px}.stage.drag{outline:3px dashed #587561}.empty{text-align:center;padding:16px}.empty strong{display:block;margin-bottom:8px}canvas{display:block;max-width:100%;max-height:62vh;width:auto;height:auto;touch-action:none;cursor:crosshair;box-shadow:0 3px 15px #252d2330}canvas[hidden],.empty[hidden]{display:none}.field{display:block;margin:14px 0}.field select{width:100%;margin-top:4px}.actions button{width:100%;margin-top:8px}small{color:#535968}.status{margin:12px 0 0;min-height:1.5em;overflow-wrap:anywhere}label{font-size:.9rem}#sample{background:white}@media(max-width:720px){.layout{grid-template-columns:1fr}.stage{min-height:220px}} 
+</style>
+</head>
+<body><main>
+<header><div class="privacy">On-device editing · No uploads</div><h1>Screenshot Cleaner</h1><p>Crop screenshots and cover private details before you share them.</p></header>
+<div class="layout">
+<section class="panel" aria-label="Editor">
+<div class="bar"><button class="primary" id="open">Open screenshots</button><button id="sample">Try sample batch</button><input id="files" type="file" accept=".png,.jpg,.jpeg,.webp" multiple hidden></div>
+<div class="tools"><button id="mask" aria-pressed="true">Cover</button><button id="crop" aria-pressed="false">Crop</button><button id="undo">Undo</button><button id="clear">Clear edits</button></div>
+<div class="stage" id="stage"><div class="empty" id="empty"><strong>Drop screenshots here</strong><small>PNG, JPEG or WebP · Up to 20 images</small></div><canvas id="canvas" role="img" aria-label="Screenshot editing preview" hidden></canvas></div>
+<p id="status" class="status" role="status"></p>
+</section>
+<aside class="panel">
+<h2>Batch preview</h2>
+<p>Drag on the image to draw a cover or select a crop. Switch images to check each result.</p>
+<label class="field">Screenshot<select id="picker" aria-label="Screenshot to preview"></select></label>
+<label><input id="batch" type="checkbox"> Apply new covers to matching sizes</label>
+<p><small>Use this for screenshots with the same layout. Crops apply to the selected image.</small></p>
+<div class="actions"><button id="single">Download selected PNG</button><button class="primary" id="zip">Download batch ZIP</button></div>
+</aside>
+</div></main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const canvas = $('canvas');
+const context = canvas.getContext('2d');
+const images = [];
+const history = [];
+let index = 0;
+let mode = 'mask';
+let gesture = null;
+let busy = false;
+const current = () => images[index];
+const say = message => { $('status').textContent = message; };
+
+function controls() {
+  const available = images.length > 0;
+  for (const id of ['mask','crop','clear','single','picker']) $(id).disabled = busy || !available;
+  $('undo').disabled = busy || !history.length;
+  $('batch').disabled = busy || images.length < 2;
+  $('zip').disabled = busy || images.length < 2;
+  $('open').disabled = $('sample').disabled = busy;
+  $('empty').hidden = available;
+  canvas.hidden = !available;
+}
+
+function bounds(image) {
+  return image.crop || {x:0,y:0,w:image.source.width,h:image.source.height};
+}
+
+function paint(target, image, region) {
+  const ctx = target.getContext('2d');
+  ctx.clearRect(0,0,target.width,target.height);
+  ctx.drawImage(image.source,region.x,region.y,region.w,region.h,0,0,region.w,region.h);
+  ctx.fillStyle = '#171a22';
+  for (const box of image.masks) ctx.fillRect(box.x-region.x,box.y-region.y,box.w,box.h);
+}
+
+function render() {
+  controls();
+  const image = current();
+  if (!image) return;
+  const region = bounds(image);
+  if (canvas.width !== region.w || canvas.height !== region.h) {
+    canvas.width = region.w;
+    canvas.height = region.h;
+  }
+  paint(canvas,image,region);
+  if (!gesture) return;
+  const box = rectangle(gesture.start,gesture.end,region);
+  if (mode === 'mask') {
+    context.fillStyle = '#171a22';
+    context.fillRect(box.x-region.x,box.y-region.y,box.w,box.h);
+  } else {
+    context.strokeStyle = '#fff';
+    context.lineWidth = Math.max(2,canvas.width/280);
+    context.strokeRect(box.x-region.x,box.y-region.y,box.w,box.h);
+  }
+}
+
+function install(next) {
+  for (const image of images) image.source.close?.();
+  images.splice(0,images.length,...next);
+  history.length = 0;
+  index = 0;
+  $('batch').checked = false;
+  $('picker').replaceChildren(...images.map((image,i) => new Option(image.name,String(i))));
+  render();
+}
+
+function entry(name,source) {
+  return {name,source,masks:[],crop:null};
+}
+
+async function load(files) {
+  if (busy || !files.length) return;
+  busy = true;
+  controls();
+  say('Opening screenshots…');
+  const next = [];
+  let skipped = Math.max(0,files.length-20);
+  let pixels = 0;
+  for (const file of Array.from(files).slice(0,20)) {
+    try {
+      if (file.size > 32*1024*1024 || !/\.(png|jpe?g|webp)$/i.test(file.name)) throw Error();
+      const source = await createImageBitmap(file);
+      const count = source.width*source.height;
+      if (count > 20000000 || pixels+count > 55000000) {
+        source.close();
+        throw Error();
+      }
+      pixels += count;
+      next.push(entry(file.name,source));
+    } catch { skipped++; }
+  }
+  busy = false;
+  if (next.length) install(next);
+  controls();
+  say(next.length ? next.length+' opened.'+(skipped?' '+skipped+' skipped due to file type, size, or batch limits.':'') : 'No supported screenshots could be opened.');
+}
+
+$('open').onclick = () => $('files').click();
+$('files').onchange = event => { load(event.target.files); event.target.value = ''; };
+$('stage').ondragover = event => { event.preventDefault(); $('stage').classList.add('drag'); };
+$('stage').ondragleave = () => $('stage').classList.remove('drag');
+$('stage').ondrop = event => { event.preventDefault(); $('stage').classList.remove('drag'); load(event.dataTransfer.files); };
+$('picker').onchange = event => { index = Number(event.target.value); gesture = null; render(); say(''); };
+$('sample').onclick = () => {
+  install(['Order confirmed','Order packed','Order collected'].map((title,i) => {
+    const source = document.createElement('canvas');
+    source.width = 800;
+    source.height = 450;
+    const ctx = source.getContext('2d');
+    ctx.fillStyle = '#e8ece5'; ctx.fillRect(0,0,800,450);
+    ctx.fillStyle = '#fff'; ctx.fillRect(54,44,692,362);
+    ctx.fillStyle = '#253f30'; ctx.font = 'bold 37px system-ui'; ctx.fillText(title,90,126);
+    ctx.fillStyle = '#536153'; ctx.font = '25px system-ui';
+    ctx.fillText('Demo customer '+(i+1),90,204);
+    ctx.fillText('123 Sample Street',90,248);
+    ctx.fillText('Pickup · Saturday, 2 pm',90,330);
+    return entry('sample-'+(i+1)+'.png',source);
+  }));
+  say('Sample batch loaded. Try covering the customer line on all three.');
+};
+
+for (const tool of ['mask','crop']) $(tool).onclick = () => {
+  mode = tool;
+  gesture = null;
+  $('mask').setAttribute('aria-pressed',String(mode==='mask'));
+  $('crop').setAttribute('aria-pressed',String(mode==='crop'));
+  render();
+};
+function point(event) {
+  const page = canvas.getBoundingClientRect();
+  const region = bounds(current());
+  return {
+    x: region.x+Math.max(0,Math.min(region.w,(event.clientX-page.left)*region.w/page.width)),
+    y: region.y+Math.max(0,Math.min(region.h,(event.clientY-page.top)*region.h/page.height))
+  };
+}
+function rectangle(a,b,region) {
+  const x = Math.max(region.x,Math.floor(Math.min(a.x,b.x)));
+  const y = Math.max(region.y,Math.floor(Math.min(a.y,b.y)));
+  return {x,y,w:Math.ceil(Math.max(a.x,b.x))-x,h:Math.ceil(Math.max(a.y,b.y))-y};
+}
+function remember(targets) {
+  history.push({index, edits:targets.map(image => ({image,masks:image.masks.slice(),crop:image.crop}))});
+}
+canvas.onpointerdown = event => {
+  if (busy || !current() || gesture || event.button !== 0) return;
+  const start = point(event);
+  gesture = {start,end:start,id:event.pointerId};
+  canvas.setPointerCapture(event.pointerId);
+};
+canvas.onpointermove = event => {
+  if (gesture?.id !== event.pointerId) return;
+  gesture.end = point(event);
+  render();
+};
+canvas.onpointercancel = canvas.onlostpointercapture = event => {
+  if (gesture?.id === event.pointerId) { gesture = null; render(); }
+};
+canvas.onpointerup = event => {
+  if (gesture?.id !== event.pointerId) return;
+  const image = current();
+  const end = point(event);
+  const box = rectangle(gesture.start,end,bounds(image));
+  const largeEnough = Math.abs(end.x-gesture.start.x)>=2 && Math.abs(end.y-gesture.start.y)>=2;
+  gesture = null;
+  if (largeEnough) {
+    if (mode==='crop') {
+      remember([image]);
+      image.crop = box;
+      say('Crop applied.');
+    } else {
+      const targets = $('batch').checked ? images.filter(item => item.source.width===image.source.width && item.source.height===image.source.height) : [image];
+      remember(targets);
+      for (const target of targets) target.masks.push(box);
+      say('Cover applied to '+targets.length+' of '+images.length+' screenshots.');
+    }
+  }
+  render();
+};
+$('undo').onclick = () => {
+  const last = history.pop();
+  if (!last) return;
+  for (const {image,masks,crop} of last.edits) Object.assign(image,{masks,crop});
+  index = last.index;
+  $('picker').value = String(index);
+  render();
+  say('Last edit undone.');
+};
+$('clear').onclick = () => {
+  const image = current();
+  if (!image.masks.length && !image.crop) return;
+  remember([image]);
+  image.masks = [];
+  image.crop = null;
+  render();
+  say('Edits cleared from selected screenshot.');
+};
+
+async function png(image) {
+  const output = document.createElement('canvas');
+  const region = bounds(image);
+  output.width = region.w;
+  output.height = region.h;
+  paint(output,image,region);
+  try {
+    return await new Promise((resolve,reject) => output.toBlob(blob => blob ? resolve(blob) : reject(Error('PNG encoding failed')),'image/png'));
+  } finally { output.width = output.height = 0; }
+}
+
+const crcTable = Uint32Array.from({length:256},(_,value) => {
+  for (let bit=0;bit<8;bit++) value=(value>>>1)^((value&1)?0xedb88320:0);
+  return value;
+});
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = (crc>>>8)^crcTable[(crc^byte)&255];
+  return (crc^0xffffffff)>>>0;
+}
+function header(size,fields) {
+  const buffer = new ArrayBuffer(size);
+  const view = new DataView(buffer);
+  for (const [offset,value,width] of fields) {
+    if (width===4) view.setUint32(offset,value,true);
+    else view.setUint16(offset,value,true);
+  }
+  return buffer;
+}
+async function archive() {
+  const parts = [];
+  const directory = [];
+  let offset = 0;
+  let directorySize = 0;
+  for (const [i,image] of images.entries()) {
+    const name = new TextEncoder().encode((i+1)+'-'+outputName(image));
+    const blob = await png(image);
+    const size = blob.size;
+    const checksum = crc32(new Uint8Array(await blob.arrayBuffer()));
+    parts.push(header(30,[[0,0x04034b50,4],[4,20],[6,0x800],[12,33],[14,checksum,4],[18,size,4],[22,size,4],[26,name.length]]),name,blob);
+    directory.push(header(46,[[0,0x02014b50,4],[4,20],[6,20],[8,0x800],[14,33],[16,checksum,4],[20,size,4],[24,size,4],[28,name.length],[42,offset,4]]),name);
+    offset += 30+name.length+size;
+    directorySize += 46+name.length;
+  }
+  return new Blob([...parts,...directory,header(22,[[0,0x06054b50,4],[8,images.length],[10,images.length],[12,directorySize,4],[16,offset,4]])],{type:'application/zip'});
+}
+function outputName(image) {
+  return image.name.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N}_.-]/gu,'_').slice(0,120)+'-cleaned.png';
+}
+async function download(create,name) {
+  busy = true;
+  controls();
+  say('Preparing download…');
+  try {
+    const url = URL.createObjectURL(await create());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url),60000);
+    say('Download prepared.');
+  } catch { say('Export failed. Try downloading one screenshot at a time.'); }
+  finally { busy = false; controls(); }
+}
+$('single').onclick = () => download(() => png(current()),outputName(current()));
+$('zip').onclick = () => {
+  const unedited = images.filter(image => !image.masks.length && !image.crop).length;
+  if (unedited && !confirm( unedited+' screenshots have no edits. Include them in the ZIP?')) return;
+  download(archive,'cleaned-screenshots.zip');
+};
+controls();
+</script></body></html>
