@@ -27,7 +27,7 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:browser
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'schedule' && github.event_name != 'pull_request' && vars.RELEASE_TARGET == 'github-pages' }}
         with:
           path: dist/site
