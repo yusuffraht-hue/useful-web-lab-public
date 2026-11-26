@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Signal Garden</title>
+<style>
+body{font:1rem system-ui,sans-serif;background:#152920;color:#f1f5e7;margin:0}
+main{max-width:32rem;margin:2rem auto;padding:1rem}h1{font-size:clamp(2.5rem,9vw,4.5rem);margin:.2em 0;letter-spacing:-.06em}
+p{line-height:1.55}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.55rem}
+button{font:inherit;min-height:44px;border:1px solid #b8cfb3;border-radius:.65rem;background:#2c4738;color:#fff;cursor:pointer}
+.tile{aspect-ratio:1;font-size:1.75rem}.tile[aria-pressed=true]{background:#dffa8e;color:#182614}
+button:focus-visible{outline:3px solid white;outline-offset:2px}.actions{display:flex;gap:.6rem}.actions button{padding:.4rem 1rem}
+</style>
+<main>
+<h1>Signal Garden</h1>
+<p>Light every tile. Tapping a tile flips it and its neighbours above, below, left, and right.</p>
+<p id="status" role="status"></p>
+<div class="grid" id="garden" aria-label="Puzzle tiles"></div>
+<p class="actions"><button id="undo" type="button">Undo</button><button id="restart" type="button">Restart puzzle</button></p>
+</main>
+<script>
+'use strict';
+const side = 4;
+const puzzle = [0, 6, 13];
+const board = Array(side * side).fill(true);
+const moves = [];
+const garden = document.querySelector('#garden');
+const status = document.querySelector('#status');
+const undo = document.querySelector('#undo');
+const tiles = board.map((_, index) => {
+  const tile = document.createElement('button');
+  tile.type = 'button';
+  tile.className = 'tile';
+  tile.setAttribute('aria-label', 'Tile ' + (index + 1));
+  tile.addEventListener('click', () => {
+    if (board.every(Boolean)) return;
+    flip(index);
+    moves.push(index);
+    render();
+  });
+  garden.append(tile);
+  return tile;
+});
+function flip(index) {
+  const row = Math.floor(index / side);
+  const column = index % side;
+  for (const [y, x] of [[row,column],[row-1,column],[row+1,column],[row,column-1],[row,column+1]]) {
+    if (y >= 0 && y < side && x >= 0 && x < side) {
+      const position = y * side + x;
+      board[position] = !board[position];
+    }
+  }
+}
+function render() {
+  const lit = board.filter(Boolean).length;
+  status.textContent = lit === board.length ? 'Garden lit in ' + moves.length + ' moves!' : lit + ' of ' + board.length + ' lit · Moves ' + moves.length;
+  undo.disabled = moves.length === 0;
+  tiles.forEach((tile, index) => {
+    tile.setAttribute('aria-pressed', String(board[index]));
+    tile.textContent = board[index] ? '✦' : '·';
+  });
+}
+function reset() {
+  moves.length = 0;
+  board.fill(true);
+  puzzle.forEach(flip);
+  render();
+}
+undo.addEventListener('click', () => {
+  if (moves.length) flip(moves.pop());
+  render();
+});
+document.querySelector('#restart').addEventListener('click', reset);
+reset();
+</script>
+</html>
