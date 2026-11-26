@@ -26,7 +26,7 @@ jobs:
       APP_ROUTE: ${{ matrix.route }}
       LIVE_URL: ${{ vars.LIVE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - run: |
