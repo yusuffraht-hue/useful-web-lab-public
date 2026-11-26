@@ -1,0 +1,12 @@
+{
+  "name": "useful-web-lab",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs && node scripts/build.mjs signal-garden && node scripts/package-preview.mjs",
+    "test": "npm run build && node --test tests/core.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2"
+  }
+}
