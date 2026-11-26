@@ -21,3 +21,9 @@ Use reproducible feedback or failures to pick improvements. Record the problem, 
 ## Decision history
 
 Screenshot Cleaner established the test and deployment path. Signal Garden reused the same path and passed a Chromium browser playtest. The public release repository starts with clean commit metadata to preserve the privacy of the original development history.
+
+## Routine maintenance
+
+Dependabot checks npm and GitHub Actions weekly and opens update pull requests. The browser test gate runs before any dependency update can be released. Review proposed dependency changes before merging, including runner requirements and release notes.
+
+If either hourly health check still fails after retrying, the workflow opens one tracking issue with the run link. A later failure leaves an existing open incident in place. Close the issue after confirming both public endpoints are healthy. Diagnose from the job log before changing application code. Use the rollback instructions if the deployment itself introduced the failure.

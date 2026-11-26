@@ -31,3 +31,22 @@ jobs:
           persist-credentials: false
       - run: |
           LIVE_URL="${LIVE_URL%/}${APP_ROUTE}" python3 scripts/check-live.py "$APP"
+
+  incident:
+    needs: check
+    if: ${{ always() && needs.check.result == 'failure' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open one incident if none is already open
+        run: |
+          title='Public release health check failed'
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --author 'app/github-actions' --search 'Public release health check failed in:title' --json title --jq '.[].title')"
+          if ! grep -Fxq "$title" <<< "$existing"; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "A public health check failed after retrying. See $RUN_URL. Close this after confirming both apps are healthy."
+          fi
